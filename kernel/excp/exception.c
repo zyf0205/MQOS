@@ -4,12 +4,11 @@
 #include <memory.h>
 #include <stdbool.h>
 
-bool cursor_flash = 0; /*光标*/
-bool plane_move = 0;   /*飞机移动*/
+bool cursor_flash = 0;
+bool plane_move = 0;
+bool caps_locked = false;
 
-bool caps_locked = false; /*shift按键状态*/
-
-/*键盘映射表，数组的下标对应扫描码，数组内容对应ascll码*/
+/* 键盘映射表 (保持不变) */
 char keys_map[] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '`', 0,
     0, 0, 0, 0, 0, 'q', '1', 0, 0, 0, 'z', 's', 'a', 'w', '2', 0,
@@ -19,114 +18,167 @@ char keys_map[] = {
     0, 0, '\'', 0, '[', '=', 0, 0, 0, 0, 13, ']', 0, '\\', 0, 0,
     0, 0, 0, 0, 0, 0, 127, 0, 0, 0, 0, 0, 0, 0, '`', 0};
 
-void do_keyboard(unsigned char c)
-{
-    // static unsigned long stack[10];
-    // static int index = 0; /*stack索引*/
-    // c = keys_map[c];
-    // if (c == 'a' && index < 10)
-    // {
-    //     stack[index] = get_page();
-    //     print_debug("get a page: ", stack[index]);
-    //     index++;
-    // }
-    // else if (c == 's' && index > 0)
-    // {
-    //     index--;
-    //     free_page(stack[index]);
-    //     print_debug("free a page: ", stack[index]);
-    // }
-    /*大写锁定处理*/
-    if (c == 0x58)
-    {
-        caps_locked = !caps_locked;
+/* 辅助函数：获取指定虚拟行的长度 (最后一个非空字符的下标 + 1) */
+int get_line_length(int virt_y) {
+    int x = NR_CHAR_X - 1;
+    while (x >= 0) {
+        if (video_buffer[virt_y][x] != ' ') {
+            return x + 1;
+        }
+        x--;
     }
-
-    /*根据映射表得到ascll码*/
-    c = keys_map[c];
-
-    /*小写转大写处理*/
-    if (caps_locked && c >= 'a' && c <= 'z')
-    {
-        c -= 32;
-    }
-    if (c != 0)
-    {
-        char buf[2] = {c, '\0'};
-        printk(buf);
-    }
+    return 0;
 }
 
-/*定时器中断处理函数*/
+/* 辅助函数：获取当前光标对应的虚拟行号 */
+int get_current_virt_y() {
+    return current_focus->mem_start + current_focus->view_offset + (current_focus->cur_y - current_focus->start_line);
+}
+
+/* 新增辅助函数：检查某一行是否是“有效行” (即该行或其下方是否有内容) 
+   这里简化逻辑：只要行号小于等于当前光标所在的行，或者该行本身有内容，就算有效。
+   为了更像终端，我们通常限制光标不能超过“当前最大输入行”。
+   但在简单的编辑器模式下，我们允许光标去任何有字符的地方。
+*/
+bool is_line_empty(int virt_y) {
+    return get_line_length(virt_y) == 0;
+}
+
+/* 新增辅助函数：获取区域内最后一行的虚拟行号 */
+int get_last_content_virt_y() {
+    int max_y = current_focus->mem_start; // 默认为区域起始
+    int limit = current_focus->mem_start + current_focus->mem_height;
+    
+    // 从缓冲区末尾向前扫描，找到第一个非空行
+    for (int y = limit - 1; y >= current_focus->mem_start; y--) {
+        if (get_line_length(y) > 0) {
+            max_y = y;
+            break;
+        }
+    }
+    return max_y;
+}
+
+/* 新增：处理编辑器输入逻辑 */
+void handle_editor_input(int scan_code) {
+    int virt_y = get_current_virt_y();
+    int line_len = get_line_length(virt_y);
+    int screen_height = current_focus->end_line - current_focus->start_line + 1;
+
+    // 处理方向键
+    if (scan_code == 0x75) { // Up
+        if (current_focus->cur_y > current_focus->start_line) {
+            current_focus->cur_y--;
+            int prev_virt_y = get_current_virt_y(); 
+            int prev_len = get_line_length(prev_virt_y);
+            if (current_focus->cur_x > prev_len) current_focus->cur_x = prev_len;
+        }
+    } 
+    else if (scan_code == 0x72) { // Down
+        if (current_focus->cur_y < current_focus->end_line) {
+            int next_virt_y = get_current_virt_y() + 1;
+            if (get_line_length(next_virt_y) > 0) {
+                current_focus->cur_y++;
+                int next_len = get_line_length(next_virt_y);
+                if (current_focus->cur_x > next_len) current_focus->cur_x = next_len;
+            }
+        }
+    }
+    else if (scan_code == 0x6B) { // Left
+        if (current_focus->cur_x > 0) {
+            current_focus->cur_x--;
+        } else {
+            if (current_focus->cur_y > current_focus->start_line) {
+                current_focus->cur_y--;
+                int prev_virt_y = get_current_virt_y();
+                current_focus->cur_x = get_line_length(prev_virt_y);
+            }
+        }
+    }
+    else if (scan_code == 0x74) { // Right
+        if (current_focus->cur_x < line_len) {
+             current_focus->cur_x++;
+        } else {
+            if (current_focus->cur_y < current_focus->end_line) {
+                int next_virt_y = get_current_virt_y() + 1;
+                if (get_line_length(next_virt_y) > 0) {
+                    current_focus->cur_y++;
+                    current_focus->cur_x = 0;
+                }
+            }
+        }
+    }
+    else if (scan_code == 0x0D) { // Tab
+        if (current_focus == &top_region) current_focus = &bottom_region;
+        else current_focus = &top_region;
+    }
+    else if (scan_code == 0x05) { // F1: 向上滚
+        // 只有当视口偏移大于0时才允许向上滚
+        if (current_focus->view_offset > 0) {
+            console_scroll(-1); 
+        }
+        return;
+    }
+    else if (scan_code == 0x06) { // F2: 向下滚
+        // 计算内容总高度 (相对于 mem_start)
+        int last_content_y = get_last_content_virt_y();
+        int content_height = last_content_y - current_focus->mem_start + 1;
+        
+        // 只有当内容高度超过屏幕高度，且还没滚到底时，才允许向下滚
+        // 滚到底意味着：view_offset + screen_height >= content_height
+        if (content_height > screen_height && 
+            (current_focus->view_offset + screen_height < content_height)) {
+            console_scroll(1);  
+        }
+        return;
+    }
+    else {
+        // 普通字符处理
+        char c = keys_map[scan_code];
+        if (caps_locked && c >= 'a' && c <= 'z') c -= 32;
+        
+        if (c != 0) {
+            region_putc(current_focus, c);
+        }
+    }
+    
+    flush_screen();
+}
+
 void timer_interrupt()
 {
     static int systick = 0;
     systick++;
-    if (systick % 2 == 0)
-    {
-        cursor_flash = !cursor_flash;
-    }
-    if (systick % 4 == 0)
-    {
-        plane_move = !plane_move;
-    }
+    if (systick % 2 == 0) cursor_flash = !cursor_flash;
+    // 可以在这里定期刷新屏幕以实现光标闪烁
+    // if (cursor_flash) flush_screen(); 
 }
 
-/*键盘中断处理函数*/
 void key_interrupt()
 {
-    /*按下键盘和释放键盘都会产生中断，但是释放中断不处理，防止重复处理一个按键*/
-    /*按下：读取一次得到该键的扫描码*/
-    /*释放：读取两次，第一次得到0xf0,第二次得到扫描码*/
     unsigned char c;
-    static bool is_break = false;    /*是否收到f0*/
-    static bool is_extended = false; /*是否收到E0扩展码*/
-    /*键盘按下处理，得到扫描码*/
+    static bool is_break = false;
+    static bool is_extended = false;
+    
     c = *(volatile unsigned char *)L7A_I8042_DATA;
 
-    if (c == 0xE0)
-    {
-        is_extended = true;
-        return;
-    }
-    if (c == 0xF0)
-    {
-        is_break = true;
-        return;
-    }
-    /*释放状态，上一次接收到了f0*/
-    if (is_break)
-    {
-        is_break = false; /*重置状态*/
-        is_extended = false;
-        /*有释放案件处理可以在这里实现*/
-        return;
-    }
+    if (c == 0xE0) { is_extended = true; return; }
+    if (c == 0xF0) { is_break = true; return; }
+    if (is_break) { is_break = false; is_extended = false; return; }
 
-    if (is_extended)
-    {
+    if (c == 0x58) caps_locked = !caps_locked; // CapsLock
+
+    if (is_extended) {
         is_extended = false;
-        switch (c)
-        {
-        case 0x75:
-            console_move_cursor(0, -1);
-            break; // Up
-        case 0x72:
-            console_move_cursor(0, 1);
-            break; // Down
-        case 0x6B:
-            console_move_cursor(-1, 0);
-            break; // Left
-        case 0x74:
-            console_move_cursor(1, 0);
-            break; // Right
-        }
+        // 直接传递扩展码对应的扫描码给处理函数
+        handle_editor_input(c); 
         return;
     }
-    do_keyboard(c);
+    
+    // 传递普通扫描码
+    handle_editor_input(c);
 }
 
-/*通用异常处理函数,在汇编中被调用*/
 void do_exception()
 {
     unsigned int estat; /* 异常状态寄存器的值 */
