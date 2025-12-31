@@ -192,6 +192,15 @@ void handle_editor_input(int scan_code)
         }
         return;
     }
+    else if (scan_code == 0x04)
+    {
+        static int color_idx = 0; // 颜色索引
+        set_color(color_idx);
+        flush_screen(current_focus);
+        update_status_bar();
+        color_idx = (color_idx + 1) % 5;
+        return;
+    }
     else
     {
         // 普通字符处理

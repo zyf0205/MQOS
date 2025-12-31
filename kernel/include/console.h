@@ -20,14 +20,13 @@
 /* 颜色枚举 */
 enum COLOR
 {
-    BLACK = 0,
-    WHITE = 1,
-    RED = 2,
-    GREEN = 3,
-    BLUE = 4,
-    YELLOW = 5,
-    CYAN = 6,
-    MAGENTA = 7
+    RED = 0,
+    GREEN = 1,
+    YELLOW = 2,
+    CYAN = 3,
+    MAGENTA = 4,
+    WHITE = 5,
+    BLACK = 6
 };
 /* RGB 颜色结构 */
 struct RGB
