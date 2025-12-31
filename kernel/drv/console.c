@@ -4,14 +4,13 @@
 #include <stddef.h>
 
 struct RGB color_map[] = {
-    {0, 0, 0, 0},       // BLACK
-    {255, 255, 255, 0}, // WHITE
-    {255, 0, 0, 0},     // RED
-    {0, 255, 0, 0},     // GREEN
-    {0, 0, 255, 0},     // BLUE
-    {255, 255, 0, 0},   // YELLOW
-    {0, 255, 255, 0},   // CYAN
-    {255, 0, 255, 0}    // MAGENTA
+    {255, 0, 0, 0},     // 0: RED
+    {0, 255, 0, 0},     // 1: GREEN
+    {255, 255, 0, 0},   // 2: YELLOW
+    {0, 255, 255, 0},   // 3: CYAN
+    {255, 0, 255, 0},   // 4: MAGENTA
+    {255, 255, 255, 0}, // 5: WHITE
+    {0, 0, 0, 0}        // 6: BLACK
 };
 
 char video_buffer[VIRT_BUFFER_HEIGHT][NR_CHAR_X]; /* 缓冲区200x160 */
@@ -61,10 +60,9 @@ void update_status_bar()
     int x;
 
     // 1. 绘制背景条 (使用深灰色或蓝色背景，白色文字)
-    // 这里简单起见，用 '-' 填充背景，或者直接画空格清空
     for (x = 0; x < NR_CHAR_X; x++)
     {
-        write_char_with_color('_', x, y, BLACK); // 清空背景
+        write_char_with_color(' ', x, y, BLACK); // 清空背景
     }
 
     // 2. 显示左侧信息：系统名称
@@ -100,7 +98,7 @@ void update_status_bar()
     }
 
     // 4. 显示右侧信息：操作提示
-    const char *hint = "[TAB] Switch Focus  [F1/F2] Scroll";
+    const char *hint = "[F3] Switch Colors  [TAB] Switch Focus  [F1/F2] Scroll";
     int hint_len = 0;
     while (hint[hint_len])
         hint_len++;
@@ -213,7 +211,7 @@ void delete_char_at(ConsoleRegion *reg, int virt_y, int x)
             {
                 tail_pos--;
             }
-            
+
             /* 借来的字符应该放在 tail_pos + 1 的位置 */
             /* 如果整行都是满的(理论上不可能，因为刚移位过)，就放在最后 */
             if (tail_pos < NR_CHAR_X - 1)
@@ -224,7 +222,7 @@ void delete_char_at(ConsoleRegion *reg, int virt_y, int x)
             {
                 video_buffer[virt_y][NR_CHAR_X - 1] = next_first;
             }
-            
+
             // 递归：下一行的第一个字符被借走了，所以要删除它
             // 这会触发下一行去借下下行的字符，形成连锁反应
             delete_char_at(reg, next_virt_y, 0);
@@ -304,7 +302,7 @@ void region_putc(ConsoleRegion *reg, char c)
                 int last_x = NR_CHAR_X - 1;
                 while (last_x >= 0 && video_buffer[prev_virt_y][last_x] == ' ')
                     last_x--;
-                
+
                 // 光标移动到上一行末尾的下一个位置
                 reg->cur_x = last_x + 1;
 
@@ -318,29 +316,30 @@ void region_putc(ConsoleRegion *reg, char c)
                 if (reg->cur_x < NR_CHAR_X)
                 {
                     int next_virt_y = prev_virt_y + 1;
-                    
+
                     // 只要下一行还有内容，且上一行还没满，就一直搬运
-                    while (reg->cur_x < NR_CHAR_X && 
-                           next_virt_y < reg->mem_start + reg->mem_height && 
+                    while (reg->cur_x < NR_CHAR_X &&
+                           next_virt_y < reg->mem_start + reg->mem_height &&
                            video_buffer[next_virt_y][0] != ' ')
                     {
                         // 取出下一行第一个字
                         char move_char = video_buffer[next_virt_y][0];
-                        
+
                         // 填入上一行当前光标位置
                         video_buffer[prev_virt_y][reg->cur_x] = move_char;
                         reg->cur_x++;
-                        
+
                         // 从下一行删除这个字
                         delete_char_at(reg, next_virt_y, 0);
                     }
-                    
+
                     // 搬运完成后，光标应该回到合并点
                     // 这样用户可以清楚地看到光标位置，再次按 Backspace 就能删除字符了
                     reg->cur_x = last_x + 1;
-                    
+
                     /* 再次检查边界 */
-                    if (reg->cur_x >= NR_CHAR_X) reg->cur_x = NR_CHAR_X - 1;
+                    if (reg->cur_x >= NR_CHAR_X)
+                        reg->cur_x = NR_CHAR_X - 1;
                 }
             }
         }
@@ -372,7 +371,7 @@ void con_init()
     top_region.view_offset = 0;  /* 屏幕滚动量 */
     top_region.cur_x = 0;        /* 初始光标 */
     top_region.cur_y = 1;        /* 初始光标 */
-    top_region.color = CYAN;     /* 字符颜色 */
+    top_region.color = MAGENTA;  /* 字符颜色 */
 
     /* 下半屏 */
     bottom_region.start_line = 26;
@@ -382,7 +381,7 @@ void con_init()
     bottom_region.view_offset = 0;
     bottom_region.cur_x = 0;
     bottom_region.cur_y = 26;
-    bottom_region.color = GREEN;
+    bottom_region.color = MAGENTA;
 
     current_focus = &top_region; /* 当前聚焦窗口 */
     current_color = WHITE;       /* 其他部分的颜色 */
@@ -437,5 +436,4 @@ void set_color(enum COLOR color)
 {
     if (current_focus)
         current_focus->color = color;
-    current_color = color;
 }
