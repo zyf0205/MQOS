@@ -1,6 +1,8 @@
 #ifndef CONSOLE_H
 #define CONSOLE_H
 
+#include <stdbool.h>
+
 /* 屏幕物理参数 */
 #define NR_PIX_X 1280
 #define NR_PIX_Y 800
@@ -60,10 +62,12 @@ extern ConsoleRegion *current_focus;                     /* 当前聚焦区域�
 
 /* 初始化与核心功能 */
 void con_init(void);
-void flush_screen(void);
+void flush_screen(ConsoleRegion *region);
+void update_status_bar(void);
 void console_scroll(int direction);
 /* 输出与绘图 */
 void write_char_with_color(char ascii, int xx, int yy, enum COLOR color);
+void delete_char_at(ConsoleRegion *reg, int virt_y, int x);
 void region_putc(ConsoleRegion *region, char c);
 void set_color(enum COLOR color);
 /* 输入处理 */

@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 
+#include "console.h"
+
 /* CSR 寄存器地址 */
 #define CSR_CRMD 0x0   /* 当前模式寄存器 */
 #define CSR_ECFG 0x4   /* 异常配置寄存器 */
@@ -47,5 +49,6 @@ void excp_init(void);
 void int_on(void);
 void exception_handler(void); /* 汇编入口声明 */
 void set_timer_period(unsigned int period_ms);
+void insert_char_at(ConsoleRegion *reg, int virt_y, int x, char c);
 
 #endif /* EXCEPTION_H */

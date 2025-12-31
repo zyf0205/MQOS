@@ -5,7 +5,6 @@
 #include <stdbool.h>
 
 /*全局变量定义*/
-bool cursor_flash = 0;
 bool caps_locked = false;
 
 /* 键盘映射表 */
@@ -61,6 +60,36 @@ int get_last_content_virt_y()
     return max_y;
 }
 
+/* 辅助函数：在指定位置插入字符，如果溢出则推到下一行 */
+void insert_char_at(ConsoleRegion *reg, int virt_y, int x, char c)
+{
+    // 1. 获取当前行最后一个字符 (用于判断是否溢出)
+    char last_char = video_buffer[virt_y][NR_CHAR_X - 1];
+
+    // 2. 行内右移 (从倒数第二个字符开始，向后搬运)
+    for (int i = NR_CHAR_X - 1; i > x; i--)
+    {
+        video_buffer[virt_y][i] = video_buffer[virt_y][i - 1];
+    }
+
+    // 3. 插入新字符
+    video_buffer[virt_y][x] = c;
+
+    // 4. 处理溢出字符 (如果有)
+    if (last_char != ' ')
+    {
+        // 计算下一行的虚拟坐标
+        int next_virt_y = virt_y + 1;
+
+        // 检查下一行是否在缓冲区范围内
+        if (next_virt_y < reg->mem_start + reg->mem_height)
+        {
+            // 递归：把溢出的字符插入到下一行的开头 (x=0)
+            insert_char_at(reg, next_virt_y, 0, last_char);
+        }
+    }
+}
+
 /*输入处理逻辑*/
 /* 处理编辑器输入逻辑 */
 void handle_editor_input(int scan_code)
@@ -75,27 +104,13 @@ void handle_editor_input(int scan_code)
         if (current_focus->cur_y > current_focus->start_line)
         {
             current_focus->cur_y--;
-            /* 移动后检查光标是否超出上一行的长度，如果超出则对齐到行末 */
-            int prev_virt_y = get_current_virt_y();
-            int prev_len = get_line_length(prev_virt_y);
-            if (current_focus->cur_x > prev_len)
-                current_focus->cur_x = prev_len;
         }
     }
     else if (scan_code == 0x72)
     { // Down (向下移动)
         if (current_focus->cur_y < current_focus->end_line)
         {
-            /* 只有当下一行有内容时才允许向下移动 */
-            int next_virt_y = get_current_virt_y() + 1;
-            if (get_line_length(next_virt_y) > 0)
-            {
-                current_focus->cur_y++;
-                /* 同样检查并修正光标 X 坐标 */
-                int next_len = get_line_length(next_virt_y);
-                if (current_focus->cur_x > next_len)
-                    current_focus->cur_x = next_len;
-            }
+            current_focus->cur_y++;
         }
     }
     else if (scan_code == 0x6B)
@@ -138,10 +153,21 @@ void handle_editor_input(int scan_code)
     }
     else if (scan_code == 0x0D)
     { // Tab (切换分屏焦点)
+        // 1. 切换焦点指针
         if (current_focus == &top_region)
             current_focus = &bottom_region;
         else
             current_focus = &top_region;
+
+        // 2. 更新顶部状态栏 (显示当前是谁聚焦)
+        update_status_bar();
+
+        // 3. 刷新两个区域以更新光标显示 (旧光标变普通字符，新光标出现)
+        // 虽然有点重，但为了光标正确显示是必要的
+        flush_screen(&top_region);
+        flush_screen(&bottom_region);
+
+        return;
     }
     else if (scan_code == 0x05)
     { // F1: 向上滚屏 (查看历史)
@@ -153,7 +179,7 @@ void handle_editor_input(int scan_code)
         return;
     }
     else if (scan_code == 0x06)
-    { // F2: 向下滚屏 (查看新内容)
+    { // F2: 向下滚屏
         // 计算内容总高度 (相对于 mem_start)
         int last_content_y = get_last_content_virt_y();
         int content_height = last_content_y - current_focus->mem_start + 1;
@@ -170,17 +196,36 @@ void handle_editor_input(int scan_code)
     {
         // 普通字符处理
         char c = keys_map[scan_code];
-        /* 处理大写锁定 */
         if (caps_locked && c >= 'a' && c <= 'z')
             c -= 32;
 
         if (c != 0)
         {
-            region_putc(current_focus, c);
+            if (c >= 32 && c != 127)
+            {
+                // 使用新的递归插入函数
+                insert_char_at(current_focus, virt_y, current_focus->cur_x, c);
+
+                // 移动光标
+                current_focus->cur_x++;
+                if (current_focus->cur_x >= NR_CHAR_X)
+                {
+                    current_focus->cur_x = 0;
+                    if (current_focus->cur_y < current_focus->end_line)
+                        current_focus->cur_y++;
+                    else
+                        console_scroll(1); // 到底了自动滚屏
+                }
+            }
+            else
+            {
+                // 控制字符 (如回车、退格) 仍然走 region_putc
+                region_putc(current_focus, c);
+            }
         }
     }
 
-    flush_screen();
+    flush_screen(current_focus); /*局部刷新*/
 }
 
 /*中断处理函数*/
@@ -188,8 +233,6 @@ void timer_interrupt()
 {
     static int systick = 0;
     systick++;
-    if (systick % 2 == 0)
-        cursor_flash = !cursor_flash;
 }
 
 void key_interrupt()
