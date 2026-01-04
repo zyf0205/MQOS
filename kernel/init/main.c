@@ -64,25 +64,11 @@ void run_startup_tests()
 void main()
 {
     excp_init();          /*中断初始化*/
-    set_timer_period(25); /*设置中断周期250ms*/
+    //set_timer_period(1000); /*设置定时器周期1000ms*/
     int_on();             /*开中断*/
     con_init();           /*初始化分屏*/
 
-    /*测试上半屏*/
     current_focus = &top_region;
-    for (int i = 0; i < 30; i++)
-    {
-        for (int j = 0; j < 160; j++)
-        {
-            printk("1");
-        }
-    }
-
-    // run_startup_tests();
-
-    // /*测试下半屏*/
-    // current_focus = &bottom_region;
-    // run_startup_tests();
 
     while (1)
     {

@@ -27,15 +27,21 @@ void write_char_with_color(char ascii, int xx, int yy, enum COLOR color)
     char *pos;
     struct RGB col_rgb = color_map[color];
 
+    /*拿到字符*/
     font_byte = &fonts[(ascii - 32) * CHAR_HEIGHT];
+    /*得到显存位置*/
     pos = (char *)(VRAM_BASE + (yy * CHAR_HEIGHT * NR_PIX_X + xx * CHAR_WIDTH) * NR_BYTE_PIX);
 
+    /*行循环*/
     for (row = 0; row < CHAR_HEIGHT; row++, font_byte++)
     {
+        /*列循环*/
         for (col = 0; col < CHAR_WIDTH; col++)
         {
+            /*通过掩码判断当前像素点是否要绘制*/
             if (*font_byte & (1 << (7 - col)))
             {
+                /*设置为相对应的rgba分量*/
                 *pos++ = col_rgb.r;
                 *pos++ = col_rgb.g;
                 *pos++ = col_rgb.b;
@@ -49,6 +55,7 @@ void write_char_with_color(char ascii, int xx, int yy, enum COLOR color)
                 *pos++ = 0;
             }
         }
+        /*显存地址跳到下一行的左边起始位置*/
         pos += (NR_PIX_X - CHAR_WIDTH) * NR_BYTE_PIX;
     }
 }
@@ -59,20 +66,20 @@ void update_status_bar()
     int y = 0; // 状态栏固定在第 0 行
     int x;
 
-    // 1. 绘制背景条 (使用深灰色或蓝色背景，白色文字)
+    // 绘制背景条 (使用深灰色或蓝色背景，白色文字)
     for (x = 0; x < NR_CHAR_X; x++)
     {
         write_char_with_color(' ', x, y, BLACK); // 清空背景
     }
 
-    // 2. 显示左侧信息：系统名称
+    // 显示左侧信息：系统名称
     const char *sys_name = "MYMQOS Kernel v1.0";
     for (int i = 0; sys_name[i]; i++)
     {
         write_char_with_color(sys_name[i], 1 + i, y, YELLOW);
     }
 
-    // 3. 显示中间信息：当前聚焦区域提示
+    // 显示中间信息：当前聚焦区域提示
     const char *focus_msg;
     enum COLOR focus_color;
 
@@ -87,17 +94,18 @@ void update_status_bar()
         focus_color = bottom_region.color;
     }
 
+    /*得到中间坐标*/
     int msg_len = 0;
     while (focus_msg[msg_len])
         msg_len++;
-
     int center_x = (NR_CHAR_X - msg_len) / 2;
+
     for (int i = 0; i < msg_len; i++)
     {
         write_char_with_color(focus_msg[i], center_x + i, y, focus_color);
     }
 
-    // 4. 显示右侧信息：操作提示
+    // 显示右侧信息：操作提示
     const char *hint = "[F3] Switch Colors  [TAB] Switch Focus  [F1/F2] Scroll";
     int hint_len = 0;
     while (hint[hint_len])
@@ -110,7 +118,7 @@ void update_status_bar()
     }
 }
 
-/* 刷新屏幕 (优化版：只刷新指定区域) */
+/* 刷新屏幕 只刷新指定区域 */
 /* 如果 region 为 NULL，则刷新全屏 */
 void flush_screen(ConsoleRegion *region)
 {
@@ -147,7 +155,7 @@ void flush_screen(ConsoleRegion *region)
         }
 
         /* 计算对应的虚拟缓冲区行号 */
-        /* (y - reg->start_line)  相对行号 */
+        /* (y - reg->start_line)  相对上下半屏幕的相对行号 */
         /* reg->view_offset       往下滚动行数 */
         /* reg->mem_start         当前区域的缓冲区基地址 */
         int virt_y = reg->mem_start + reg->view_offset + (y - reg->start_line);
@@ -184,10 +192,10 @@ int get_cursor_virt_y(ConsoleRegion *reg)
     return reg->mem_start + reg->view_offset + (reg->cur_y - reg->start_line);
 }
 
-/* 辅助函数：从指定位置开始删除一个字符，后续内容前移 */
+/* 从指定位置开始删除一个字符，后续内容前移 */
 void delete_char_at(ConsoleRegion *reg, int virt_y, int x)
 {
-    // 1. 行内左移：把 x 之后的所有字符往前挪一位
+    // 行内左移：把 x 之后的所有字符往前挪一位
     for (int i = x; i < NR_CHAR_X - 1; i++)
     {
         video_buffer[virt_y][i] = video_buffer[virt_y][i + 1];
@@ -195,17 +203,16 @@ void delete_char_at(ConsoleRegion *reg, int virt_y, int x)
     // 最后一个字符位置先置空，等待后面填补
     video_buffer[virt_y][NR_CHAR_X - 1] = ' ';
 
-    // 2. 尝试从下一行“借”一个字符填补本行末尾
+    // 尝试从下一行“借”一个字符填补本行末尾
     int next_virt_y = virt_y + 1;
+    /*下一行在虚拟缓冲中*/
     if (next_virt_y < reg->mem_start + reg->mem_height)
     {
         char next_first = video_buffer[next_virt_y][0];
 
         if (next_first != ' ')
         {
-            /* 关键修复：找到当前行真正的“末尾” */
-            /* 因为上面刚刚执行了左移，所以现在行末肯定是空格 */
-            /* 我们需要找到最后一个非空字符的位置 */
+            /*找到上一行最后一个不为空格的地方*/
             int tail_pos = NR_CHAR_X - 1;
             while (tail_pos >= 0 && video_buffer[virt_y][tail_pos] == ' ')
             {
@@ -213,7 +220,7 @@ void delete_char_at(ConsoleRegion *reg, int virt_y, int x)
             }
 
             /* 借来的字符应该放在 tail_pos + 1 的位置 */
-            /* 如果整行都是满的(理论上不可能，因为刚移位过)，就放在最后 */
+            /* 如果整行都是满的，就放在最后 */
             if (tail_pos < NR_CHAR_X - 1)
             {
                 video_buffer[virt_y][tail_pos + 1] = next_first;
@@ -265,7 +272,7 @@ void region_putc(ConsoleRegion *reg, char c)
                         video_buffer[i][x] = video_buffer[i + 1][x];
                     }
                 }
-                // 清空新的一行
+                // 清空最下面的一行
                 for (int x = 0; x < NR_CHAR_X; x++)
                     video_buffer[end][x] = ' ';
             }
@@ -296,9 +303,10 @@ void region_putc(ConsoleRegion *reg, char c)
 
             if (can_move_up)
             {
+                /*获取当前光标虚拟行号*/
                 int prev_virt_y = get_cursor_virt_y(reg);
 
-                // 1. 找到上一行内容的末尾
+                // 找到上一行内容的末尾
                 int last_x = NR_CHAR_X - 1;
                 while (last_x >= 0 && video_buffer[prev_virt_y][last_x] == ' ')
                     last_x--;
@@ -306,13 +314,13 @@ void region_putc(ConsoleRegion *reg, char c)
                 // 光标移动到上一行末尾的下一个位置
                 reg->cur_x = last_x + 1;
 
-                /* 修复：防止光标越界导致消失 (最大只能是 159) */
+                /* 防止光标越界导致消失 (最大只能是 159) */
                 if (reg->cur_x >= NR_CHAR_X)
                 {
                     reg->cur_x = NR_CHAR_X - 1;
                 }
 
-                // 2. 如果上一行没满，就开始从下一行(原来的当前行)拉取内容
+                // 如果上一行没满，就开始从下一行(原来的当前行)拉取内容
                 if (reg->cur_x < NR_CHAR_X)
                 {
                     int next_virt_y = prev_virt_y + 1;
@@ -333,8 +341,7 @@ void region_putc(ConsoleRegion *reg, char c)
                         delete_char_at(reg, next_virt_y, 0);
                     }
 
-                    // 搬运完成后，光标应该回到合并点
-                    // 这样用户可以清楚地看到光标位置，再次按 Backspace 就能删除字符了
+                    // 搬运完成后，光标回到合并点
                     reg->cur_x = last_x + 1;
 
                     /* 再次检查边界 */
@@ -346,8 +353,6 @@ void region_putc(ConsoleRegion *reg, char c)
     }
     else /*普通字符*/
     {
-        // 注意：普通字符的插入逻辑现在主要由 handle_editor_input 接管了
-        // 这里保留是为了兼容 printk 等非交互式输出
         video_buffer[virt_y][reg->cur_x] = c;
         reg->cur_x++;
         if (reg->cur_x >= NR_CHAR_X)

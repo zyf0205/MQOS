@@ -6,7 +6,7 @@
 /* 屏幕物理参数 */
 #define NR_PIX_X 1280
 #define NR_PIX_Y 800
-#define NR_BYTE_PIX 4
+#define NR_BYTE_PIX 4 /*每像素字节数rgba*/
 #define VRAM_BASE 0x40000000UL
 /* 字符参数 */
 #define CHAR_HEIGHT 16

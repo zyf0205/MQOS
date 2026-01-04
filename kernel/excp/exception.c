@@ -17,10 +17,6 @@ char keys_map[] = {
     0, 0, '\'', 0, '[', '=', 0, 0, 0, 0, 13, ']', 0, '\\', 0, 0,
     0, 0, 0, 0, 0, 0, 127, 0, 0, 0, 0, 0, 0, 0, '`', 0};
 
-/* ==========================================================================
- * 辅助函数 (Helpers)
- * ========================================================================== */
-
 /* 获取指定虚拟行的长度 (最后一个非空字符的下标 + 1) */
 int get_line_length(int virt_y)
 {
@@ -42,7 +38,7 @@ int get_current_virt_y()
     return current_focus->mem_start + current_focus->view_offset + (current_focus->cur_y - current_focus->start_line);
 }
 
-/* 获取区域内最后一行的虚拟行号 */
+/* 获取区域内最后一有效行的虚拟行号 */
 int get_last_content_virt_y()
 {
     int max_y = current_focus->mem_start; // 默认为区域起始
@@ -60,22 +56,22 @@ int get_last_content_virt_y()
     return max_y;
 }
 
-/* 辅助函数：在指定位置插入字符，如果溢出则推到下一行 */
+/* 在指定位置插入字符，如果溢出则推到下一行 */
 void insert_char_at(ConsoleRegion *reg, int virt_y, int x, char c)
 {
-    // 1. 获取当前行最后一个字符 (用于判断是否溢出)
+    // 获取当前行最后一个字符 (用于判断是否溢出)
     char last_char = video_buffer[virt_y][NR_CHAR_X - 1];
 
-    // 2. 行内右移 (从倒数第二个字符开始，向后搬运)
+    // 行内右移 (从倒数第二个字符开始，向后搬运)
     for (int i = NR_CHAR_X - 1; i > x; i--)
     {
         video_buffer[virt_y][i] = video_buffer[virt_y][i - 1];
     }
 
-    // 3. 插入新字符
+    // 插入新字符
     video_buffer[virt_y][x] = c;
 
-    // 4. 处理溢出字符 (如果有)
+    // 处理溢出字符 (如果有)
     if (last_char != ' ')
     {
         // 计算下一行的虚拟坐标
@@ -153,17 +149,16 @@ void handle_editor_input(int scan_code)
     }
     else if (scan_code == 0x0D)
     { // Tab (切换分屏焦点)
-        // 1. 切换焦点指针
+        // 切换焦点指针
         if (current_focus == &top_region)
             current_focus = &bottom_region;
         else
             current_focus = &top_region;
 
-        // 2. 更新顶部状态栏 (显示当前是谁聚焦)
+        // 更新顶部状态栏
         update_status_bar();
 
-        // 3. 刷新两个区域以更新光标显示 (旧光标变普通字符，新光标出现)
-        // 虽然有点重，但为了光标正确显示是必要的
+        // 刷新两个区域以更新光标显示 (旧光标变空格，新光标出现)
         flush_screen(&top_region);
         flush_screen(&bottom_region);
 
@@ -212,7 +207,7 @@ void handle_editor_input(int scan_code)
         {
             if (c >= 32 && c != 127)
             {
-                // 使用新的递归插入函数
+                // 使用递归插入函数
                 insert_char_at(current_focus, virt_y, current_focus->cur_x, c);
 
                 // 移动光标
@@ -356,7 +351,7 @@ void set_timer_period(unsigned int period_ms)
     unsigned int cpu_freq;
 
     /* 读取 CPU 频率 (单位: Hz) */
-    cpu_freq = read_cpucfg(CC_FREQ);
+    cpu_freq = read_cpucfg(1);
 
     /* 计算定时器计数值 */
     val = (unsigned long)cpu_freq * period_ms / 1000;
